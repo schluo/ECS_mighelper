@@ -2,7 +2,7 @@
 # encoding: utf-8
 
 __author__ = "Oliver Schlueter"
-__copyright__ = "Copyright 2020, Dell Technologies"
+__copyright__ = "Copyright 2022, Dell Technologies"
 __license__ = "GPL"
 __version__ = "1.0.1"
 __email__ = "oliver.schlueter@dell.com"
