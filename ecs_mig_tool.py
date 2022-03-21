@@ -31,14 +31,13 @@ __status__ = "Production"
 """
 
 import argparse
-import sys
-import os
-import re
-import json
-import requests
-import urllib3
 import datetime
 import logging
+import re
+import sys
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -149,13 +148,17 @@ class ecs:
                     if self.testrun:
                         print(url, rc['name'], rc['period'])
                     else:
-                        r = requests.post(url, verify=False, headers={"X-SDS-AUTH-TOKEN": ecs_token, "Content-Type": "application/json"}, json={"name": rc['name'], "period": rc['period']})
+                        r = requests.post(url, verify=False,
+                                          headers={"X-SDS-AUTH-TOKEN": ecs_token, "Content-Type": "application/json"},
+                                          json={"name": rc['name'], "period": rc['period']})
                         if r.status_code == 200:
-                            print("SUCCESS: Rentention Class ", rc['name'], " with period ", rc['period'], " successfully created.")
-                            logging.info("SUCCESS: Rentention Class " + str(rc['name']) + " with period " + str(rc['period']) + " successfully created.")
+                            print("SUCCESS: Rentention Class ", rc['name'], " with period ", rc['period'],
+                                  " successfully created.")
+                            logging.info("SUCCESS: Rentention Class " + str(rc['name']) + " with period " + str(
+                                rc['period']) + " successfully created.")
                         else:
                             print("FAILED: Rentention Class ", rc['name'], " could not be created.")
-                            print(" --> " ,r.content)
+                            print(" --> ", r.content)
                             logging.error("FAILED: Rentention Class " + rc['name'] + " could not be created.")
                             logging.error(" --> " + str(r.content))
                 except:
@@ -166,7 +169,6 @@ class ecs:
                 logging.error("Not able to create retention class: " + str(err))
                 print(timestamp + ": Not able to create retention class: " + str(err))
                 exit(1)
-
 
     def parse_csv(self):
         with open(self.csv_filename) as csv_file:
@@ -179,7 +181,7 @@ class ecs:
                     except:
                         temp = 0
 
-                    if col in ["year","month", "day","hrs","min","years","months","days","mins"]:
+                    if col in ["year", "month", "day", "hrs", "min", "years", "months", "days", "mins"]:
                         if col == "year" or col == "years":
                             seconds = 365 * 24 * 60 * 60
                         if col == "month" or col == "months":
@@ -193,6 +195,7 @@ class ecs:
                         ret_period = ret_period + col_number * seconds
                 self.ret_classes.append({'name': cols[0], 'period': ret_period})
 
+
 def main():
     # get and test arguments
     get_argument()
@@ -203,11 +206,9 @@ def main():
     logging.basicConfig(filename='ecs2checkmk.log', level=logging.INFO, format=FORMAT)
     logging.info('Started')
 
-
     # store timestamp
     global timestamp, metric_filter_file, metric_config_file
     timestamp = datetime.datetime.now().strftime("%d-%b-%Y (%H:%M:%S)")
-
 
     # display arguments if DEBUG enabled
     if DEBUG:
@@ -219,12 +220,12 @@ def main():
     else:
         sys.tracebacklimit = 0
 
-
     myecs = ecs()
     myecs.parse_csv()
     myecs.send_post_retentionclass()
 
     logging.info('Finished')
+
 
 if __name__ == '__main__':
     main()
