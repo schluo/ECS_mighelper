@@ -11,7 +11,7 @@ __status__ = "Production"
 """"
 ###########################################################################################################
 
-  DELL EMC ECS plugin for check_mk
+  DELL EMC ECS Migration Helper Tool
 
   Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
   and associated documentation files (the "Software"), to deal in the Software without restriction, 
@@ -35,7 +35,6 @@ import datetime
 import logging
 import re
 import sys
-
 import requests
 import urllib3
 
@@ -60,7 +59,6 @@ def get_argument():
     global hostaddress, username, password, namespace, csv_filename, testrun
 
     try:
-
         # Setup argument parser
         parser = argparse.ArgumentParser()
         parser.add_argument('-H', '--hostname',
@@ -118,7 +116,7 @@ class ecs:
         self.password = password
         self.namespace = namespace
         self.csv_filename = csv_filename
-        self.hostname = hostaddress
+        self.hostname = hostaddress.replace("https://","").replace("HTTPS://", "")
         self.ret_classes = []
         self.testrun = testrun
 
@@ -126,7 +124,7 @@ class ecs:
 
         try:
             # try to get token
-            url = 'https://' + hostaddress + '/login'
+            url = 'https://' + self.hostname + '/login'
             r = requests.get(url, verify=False, auth=(self.user, self.password))
 
             # read access token from returned header
@@ -140,22 +138,28 @@ class ecs:
             print(timestamp + ": Not able to get token: " + str(err))
             exit(1)
 
+        # iterate through dict with retention definitions
         for rc in self.ret_classes:
             try:
-                url = 'https://' + hostaddress + '/object/namespaces/namespace/' + self.namespace + '/retention'
-
+                url = 'https://' + self.hostname + '/object/namespaces/namespace/' + self.namespace + '/retention'
                 try:
+                    # just a testrun
                     if self.testrun:
                         print(url, rc['name'], rc['period'])
+
+                    # run against API
                     else:
+                        # start post request
                         r = requests.post(url, verify=False,
                                           headers={"X-SDS-AUTH-TOKEN": ecs_token, "Content-Type": "application/json"},
                                           json={"name": rc['name'], "period": rc['period']})
+                        # Call was successful
                         if r.status_code == 200:
                             print("SUCCESS: Rentention Class ", rc['name'], " with period ", rc['period'],
                                   " successfully created.")
                             logging.info("SUCCESS: Rentention Class " + str(rc['name']) + " with period " + str(
                                 rc['period']) + " successfully created.")
+                        # Call wasn't successful
                         else:
                             print("FAILED: Rentention Class ", rc['name'], " could not be created.")
                             print(" --> ", r.content)
@@ -176,11 +180,13 @@ class ecs:
                 cols = row.split()
                 ret_period = 0
                 for col in cols:
+                    # check if number
                     try:
                         col_number = int(col)
                     except:
                         temp = 0
 
+                    # check which unit
                     if col in ["year", "month", "day", "hrs", "min", "years", "months", "days", "mins"]:
                         if col == "year" or col == "years":
                             seconds = 365 * 24 * 60 * 60
@@ -192,9 +198,10 @@ class ecs:
                             seconds = 60 * 60
                         if col == "min":
                             seconds = 60
+                        # increase number in seconds
                         ret_period = ret_period + col_number * seconds
+                # store retention class name and retention in seconds in dict
                 self.ret_classes.append({'name': cols[0], 'period': ret_period})
-
 
 def main():
     # get and test arguments
