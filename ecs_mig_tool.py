@@ -20,7 +20,7 @@ __status__ = "Production"
   furnished to do so, subject to the following conditions:
   The above copyright notice and this permission notice shall be included in all copies or substantial 
   portions of the Software.
-  
+
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT 
   LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
@@ -56,7 +56,7 @@ def escape_ansi(line):
 
 
 def get_argument():
-    global hostaddress, username, password, namespace, csv_filename, testrun
+    global hostname, username, password, namespace, csv_filename, testrun, replicationgroup, operation
 
     try:
         # Setup argument parser
@@ -77,10 +77,14 @@ def get_argument():
                             type=str,
                             help='namespace to work with',
                             required=True)
+        parser.add_argument('-r', '--replicationgroup',
+                            type=str,
+                            help='replicationgroup to work with',
+                            required=False)
         parser.add_argument('-o', '--operation',
                             type=str,
                             help='operation to access',
-                            choices=['retentionclass'],
+                            choices=['rc', 'buckets'],
                             required=True)
         parser.add_argument('-f', '--filename',
                             type=str,
@@ -96,12 +100,14 @@ def get_argument():
         # handle keyboard interrupt #
         return 0
 
-    hostaddress = args.hostname
+    hostname = args.hostname
     username = args.username
     password = args.password
     csv_filename = args.filename
     namespace = args.namespace
     testrun = args.testrun
+    replicationgroup = args.replicationgroup
+    operation = args.operation
 
 
 ###########################################
@@ -112,96 +118,186 @@ class ecs:
     # This class permit to connect of the ECS's API
 
     def __init__(self):
-        self.user = username
+        self.username = username
         self.password = password
         self.namespace = namespace
         self.csv_filename = csv_filename
-        self.hostname = hostaddress.replace("https://","").replace("HTTPS://", "")
+        self.hostname = hostname.replace("https://", "").replace("HTTPS://", "")
         self.ret_classes = []
+        self.buckets = []
         self.testrun = testrun
+        self.replicationgroup = replicationgroup
 
-    def send_post_retentionclass(self):
-
+    def get_token(self, hostname, username, password):
         try:
             # try to get token
-            url = 'https://' + self.hostname + '/login'
-            r = requests.get(url, verify=False, auth=(self.user, self.password))
+            url = 'https://' + hostname + '/login'
+            r = requests.get(url, verify=False, auth=(username, password))
 
             # read access token from returned header
-            ecs_token = r.headers['X-SDS-AUTH-TOKEN']
+            token = r.headers['X-SDS-AUTH-TOKEN']
 
             if DEBUG:
-                logging.info('Token: ' + ecs_token)
+                logging.info('Token: ' + token)
+            return token
 
         except Exception as err:
             logging.error('Not able to get token: ' + str(err))
             print(timestamp + ": Not able to get token: " + str(err))
-            exit(1)
+            return ""
 
+    def create_retentionclasses_from_list(self, hostname, username, password, namespace, ret_classes, testrun):
         # iterate through dict with retention definitions
-        for rc in self.ret_classes:
-            try:
-                url = 'https://' + self.hostname + '/object/namespaces/namespace/' + self.namespace + '/retention'
-                try:
-                    # just a testrun
-                    if self.testrun:
-                        print(url, rc['name'], rc['period'])
+        for rc in ret_classes:
+            self.create_retentionclass(hostname, username, password, namespace, rc['name'], rc['period'], testrun)
 
-                    # run against API
+    def create_buckets_from_list(self, hostname, username, password, namespace, buckets, testrun):
+        # iterate through dict with bucket definitions
+        for bucket in buckets:
+            self.create_bucket(hostname, username, password, bucket['namespace'], bucket['name'], testrun)
+
+    def create_bucket(self, hostname, username, password, namespace, bucket_name, testrun):
+
+        url = 'https://' + hostname + '/object/bucket'
+        try:
+            # just a testrun
+            if self.testrun:
+                print(url, bucket_name, namespace)
+
+            # run against API
+            else:
+                # start post request
+                r = requests.post(url, verify=False,
+                                  headers={"X-SDS-AUTH-TOKEN": self.token, "Content-Type": "application/json"},
+                                  json={"name": bucket_name, "namespace": namespace})
+                # Call was successful
+                if r.status_code == 200:
+                    print("SUCCESS: Bucket ", bucket_name, " in namespace ", namespace, " successfully created.")
+                    logging.info(
+                        "SUCCESS: Bucket " + bucket_name + " in namespace " + namespace + " successfully created.")
+                    return True
+
+                # Call wasn't successful
+                else:
+                    print("FAILED: Bucket ", bucket_name, " could not be created.")
+                    print(" --> ", r.content)
+                    logging.error("FAILED: Bucket " + bucket_name + " could not be created.")
+                    logging.error(" --> " + str(r.content))
+                    return False
+
+        except Exception as err:
+            logging.error("Not able to create bucket: " + str(err))
+            print(timestamp + ": Not able to create bucket: " + str(err))
+            return False
+
+    def create_retentionclass(self, hostname, username, password, namespace, class_name, class_period, testrun):
+
+        url = 'https://' + hostname + '/object/namespaces/namespace/' + namespace + '/retention'
+        try:
+            # just a testrun
+            if testrun:
+                print(url, class_name, class_period)
+
+            # run against API
+            else:
+                # start post request
+                r = requests.post(url, verify=False,
+                                  headers={"X-SDS-AUTH-TOKEN": self.token, "Content-Type": "application/json"},
+                                  json={"name": class_name, "period": class_period})
+                # Call was successful
+                if r.status_code == 200:
+                    print("SUCCESS: Rentention Class ", class_name, " with period ", class_period,
+                          " successfully created.")
+                    logging.info("SUCCESS: Rentention Class " + class_name + " with period " + str(
+                        class_period) + " successfully created.")
+                    return True
+
+                # Call wasn't successful
+                else:
+                    print("FAILED: Rentention Class ", class_name, " could not be created.")
+                    print(" --> ", r.content)
+                    logging.error("FAILED: Rentention Class " + class_name + " could not be created.")
+                    logging.error(" --> " + str(r.content))
+                    return False
+        except Exception as err:
+            print("Could not create: ", class_name, str(err))
+            logging.error("Could not create: " + str(class_name))
+            return False
+
+    def get_replicationgroup(self, hostname, username, password):
+
+        # Try to get Replicaton Group
+        try:
+            url = 'https://' + self.hostname + '/vdc/data-service/vpools'
+            # start get request
+            r = requests.get(url, verify=False, headers={"X-SDS-AUTH-TOKEN": self.token, "Accept": "application/json"})
+            # Call was successful
+            if r.status_code == 200:
+                logging.info("SUCCESS: Getting existing Replicaton Groups")
+                replicationgroup = r.json()["data_service_vpool"][0]["name"]
+                print("SUCCESS: Getting existing Replicaton Group: ", replicationgroup)
+                logging.info("SUCCESS: Getting existing Replicaton Group: " + replicationgroup)
+                return replicationgroup
+            # Call wasn't successful
+            else:
+                print("FAILED: Getting existing Replicaton Groups")
+                print(" --> ", r.content)
+                logging.error("FAILED: Getting existing Replicaton Groups")
+                logging.error(" --> " + str(r.content))
+                return ""
+        except Exception as err:
+            logging.error("Not able to get Replicaton Group: " + str(err))
+            print(timestamp + ": Not able to get Replicaton Group: " + str(err))
+            return ""
+
+    def parse_rc_csv(self, csv_filename):
+        ret_classes = []
+        try:
+            with open(csv_filename) as csv_file:
+                for row in csv_file:
+                    cols = row.split()
+                    ret_period = 0
+                    for col in cols:
+                        # check if number
+                        try:
+                            col_number = int(col)
+                        except:
+                            temp = 0
+
+                        # check which unit
+                        if col in ["year", "month", "day", "hrs", "min", "years", "months", "days", "mins"]:
+                            if col == "year" or col == "years":
+                                seconds = 365 * 24 * 60 * 60
+                            if col == "month" or col == "months":
+                                seconds = 30 * 24 * 60 * 60
+                            if col == "day" or col == "days":
+                                seconds = 24 * 60 * 60
+                            if col == "hrs":
+                                seconds = 60 * 60
+                            if col == "min":
+                                seconds = 60
+                            # increase number in seconds
+                            ret_period = ret_period + col_number * seconds
+                    # store retention class name and retention in seconds in dict
+                    ret_classes.append({'name': cols[0], 'period': ret_period})
+        except:
+            ret_classes = []
+        return ret_classes
+
+    def parse_bucket_csv(self, csv_filename):
+        buckets = []
+        try:
+            with open(csv_filename) as csv_file:
+                for row in csv_file:
+                    cols = row.split()
+                    if len(cols) > 1:
+                        buckets.append({'name': cols[0], 'namespace': cols[1]})
                     else:
-                        # start post request
-                        r = requests.post(url, verify=False,
-                                          headers={"X-SDS-AUTH-TOKEN": ecs_token, "Content-Type": "application/json"},
-                                          json={"name": rc['name'], "period": rc['period']})
-                        # Call was successful
-                        if r.status_code == 200:
-                            print("SUCCESS: Rentention Class ", rc['name'], " with period ", rc['period'],
-                                  " successfully created.")
-                            logging.info("SUCCESS: Rentention Class " + str(rc['name']) + " with period " + str(
-                                rc['period']) + " successfully created.")
-                        # Call wasn't successful
-                        else:
-                            print("FAILED: Rentention Class ", rc['name'], " could not be created.")
-                            print(" --> ", r.content)
-                            logging.error("FAILED: Rentention Class " + rc['name'] + " could not be created.")
-                            logging.error(" --> " + str(r.content))
-                except:
-                    print("Could not create: ", rc)
-                    logging.error("Could not create: " + str(rc))
+                        buckets.append({'name': cols[0], 'namespace': self.namespace})
+        except:
+            buckets = []
+        return buckets
 
-            except Exception as err:
-                logging.error("Not able to create retention class: " + str(err))
-                print(timestamp + ": Not able to create retention class: " + str(err))
-                exit(1)
-
-    def parse_csv(self):
-        with open(self.csv_filename) as csv_file:
-            for row in csv_file:
-                cols = row.split()
-                ret_period = 0
-                for col in cols:
-                    # check if number
-                    try:
-                        col_number = int(col)
-                    except:
-                        temp = 0
-
-                    # check which unit
-                    if col in ["year", "month", "day", "hrs", "min", "years", "months", "days", "mins"]:
-                        if col == "year" or col == "years":
-                            seconds = 365 * 24 * 60 * 60
-                        if col == "month" or col == "months":
-                            seconds = 30 * 24 * 60 * 60
-                        if col == "day" or col == "days":
-                            seconds = 24 * 60 * 60
-                        if col == "hrs":
-                            seconds = 60 * 60
-                        if col == "min":
-                            seconds = 60
-                        # increase number in seconds
-                        ret_period = ret_period + col_number * seconds
-                # store retention class name and retention in seconds in dict
-                self.ret_classes.append({'name': cols[0], 'period': ret_period})
 
 def main():
     # get and test arguments
@@ -210,7 +306,7 @@ def main():
     if testrun:
         print("TESTRUN")
     FORMAT = '%(asctime)-15s %(message)s'
-    logging.basicConfig(filename='ecs2checkmk.log', level=logging.INFO, format=FORMAT)
+    logging.basicConfig(filename='ECS_Mig_Helper.log', level=logging.INFO, format=FORMAT)
     logging.info('Started')
 
     # store timestamp
@@ -219,17 +315,36 @@ def main():
 
     # display arguments if DEBUG enabled
     if DEBUG:
-        logging.info("hostname: " + hostaddress)
+        logging.info("hostname: " + hostname)
         logging.info("user: " + username)
         logging.info("password: " + password)
         logging.info("csv filename: " + csv_filename)
         logging.info("namespace: " + namespace)
+        if not replicationgroup:
+            logging.info("replication group: not set")
+        else:
+            logging.info("replication group: " + replicationgroup)
     else:
         sys.tracebacklimit = 0
 
     myecs = ecs()
-    myecs.parse_csv()
-    myecs.send_post_retentionclass()
+    myecs.token = myecs.get_token(hostname, username, password)
+    if myecs.token == "":
+        exit(1)
+
+    if operation == "rc":
+        myecs.ret_classes = myecs.parse_rc_csv(csv_filename)
+        if len(myecs.ret_classes) > 0:
+            myecs.create_retentionclasses_from_list(hostname, username, password, namespace, myecs.ret_classes, testrun)
+
+    if operation == "buckets":
+        myecs.buckets = myecs.parse_bucket_csv(csv_filename)
+        if len(myecs.buckets) > 0:
+            if not replicationgroup:
+                myecs.replicationgroup = myecs.get_replicationgroup(hostname, username, password)
+            else:
+                myecs.replicationgroup = replicationgroup
+            myecs.create_buckets_from_list(hostname, username, password, namespace, myecs.buckets, testrun)
 
     logging.info('Finished')
 
