@@ -45,7 +45,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 ###########################################
 DEBUG = True
 
-
 ###########################################
 #    Methods
 ###########################################
@@ -151,25 +150,26 @@ class ecs:
         for rc in ret_classes:
             self.create_retentionclass(hostname, username, password, namespace, rc['name'], rc['period'], testrun)
 
-    def create_buckets_from_list(self, hostname, username, password, namespace, buckets, testrun):
+    def create_buckets_from_list(self, hostname, username, password, buckets, testrun):
         # iterate through dict with bucket definitions
         for bucket in buckets:
-            self.create_bucket(hostname, username, password, bucket['namespace'], bucket['name'], testrun)
+            self.create_bucket(hostname, username, password, bucket['namespace'], bucket['name'], bucket['owner'],
+                               testrun)
 
-    def create_bucket(self, hostname, username, password, namespace, bucket_name, testrun):
+    def create_bucket(self, hostname, username, password, namespace, bucket_name, bucket_owner, testrun):
 
         url = 'https://' + hostname + '/object/bucket'
         try:
             # just a testrun
-            if self.testrun:
-                print(url, bucket_name, namespace)
+            if testrun:
+                print(url, namespace, bucket_name, bucket_owner)
 
             # run against API
             else:
                 # start post request
                 r = requests.post(url, verify=False,
-                                  headers={"X-SDS-AUTH-TOKEN": self.token, "Content-Type": "application/json"},
-                                  json={"name": bucket_name, "namespace": namespace})
+                                  headers={"X-SDS-AUTH-TOKEN": self.token, "Accept": "application/json"},
+                                  json={"name": bucket_name, "namespace": namespace, "owner": bucket_owner})
                 # Call was successful
                 if r.status_code == 200:
                     print("SUCCESS: Bucket ", bucket_name, " in namespace ", namespace, " successfully created.")
@@ -179,10 +179,7 @@ class ecs:
 
                 # Call wasn't successful
                 else:
-                    print("FAILED: Bucket ", bucket_name, " could not be created.")
-                    print(" --> ", r.content)
-                    logging.error("FAILED: Bucket " + bucket_name + " could not be created.")
-                    logging.error(" --> " + str(r.content))
+                    self.handle_http_error("Bucket " + bucket_name + " could not be created.", r)
                     return False
 
         except Exception as err:
@@ -202,7 +199,7 @@ class ecs:
             else:
                 # start post request
                 r = requests.post(url, verify=False,
-                                  headers={"X-SDS-AUTH-TOKEN": self.token, "Content-Type": "application/json"},
+                                  headers={"X-SDS-AUTH-TOKEN": self.token,  "Accept": "application/json"},
                                   json={"name": class_name, "period": class_period})
                 # Call was successful
                 if r.status_code == 200:
@@ -214,10 +211,7 @@ class ecs:
 
                 # Call wasn't successful
                 else:
-                    print("FAILED: Rentention Class ", class_name, " could not be created.")
-                    print(" --> ", r.content)
-                    logging.error("FAILED: Rentention Class " + class_name + " could not be created.")
-                    logging.error(" --> " + str(r.content))
+                    self.handle_http_error("Rentention Class ", class_name, " could not be created.", r)
                     return False
         except Exception as err:
             print("Could not create: ", class_name, str(err))
@@ -240,10 +234,7 @@ class ecs:
                 return replicationgroup
             # Call wasn't successful
             else:
-                print("FAILED: Getting existing Replicaton Groups")
-                print(" --> ", r.content)
-                logging.error("FAILED: Getting existing Replicaton Groups")
-                logging.error(" --> " + str(r.content))
+                self.handle_http_error("Error while resolving Replicaton Groups ", r)
                 return ""
         except Exception as err:
             logging.error("Not able to get Replicaton Group: " + str(err))
@@ -290,28 +281,41 @@ class ecs:
             with open(csv_filename) as csv_file:
                 for row in csv_file:
                     cols = row.split()
-                    if len(cols) > 1:
-                        buckets.append({'name': cols[0], 'namespace': cols[1]})
-                    else:
-                        buckets.append({'name': cols[0], 'namespace': self.namespace})
+                    if len(cols) == 1:
+                        buckets.append({'name': cols[0], 'namespace': self.namespace, "owner": ""})
+                    if len(cols) == 2:
+                        buckets.append({'name': cols[0], 'namespace': cols[1], "owner": ""})
+                    if len(cols) == 3:
+                        buckets.append({'name': cols[0], 'namespace': cols[1], 'owner': cols[2]})
         except:
             buckets = []
         return buckets
 
+    def handle_http_error(self, errormessage, http_answer):
+
+        # is description equal to details message then ignore details
+        if http_answer.json()['description'].replace('"','') == http_answer.json()['details']:
+            error_description = str(http_answer.json()['code']) + ":" + http_answer.json()['description']
+        else:
+            error_description = str(http_answer.json()['code']) + ":" + http_answer.json()['description'] + ":" + http_answer.json()['details']
+
+        print("FAILED: " + errormessage)
+        print(" --> " + error_description)
+
+        logging.error("FAILED: " + errormessage)
+        logging.error(" --> " + error_description)
 
 def main():
     # get and test arguments
     get_argument()
+
     print("Start ...")
     if testrun:
         print("TESTRUN")
-    FORMAT = '%(asctime)-15s %(message)s'
-    logging.basicConfig(filename='ECS_Mig_Helper.log', level=logging.INFO, format=FORMAT)
-    logging.info('Started')
 
-    # store timestamp
-    global timestamp, metric_filter_file, metric_config_file
-    timestamp = datetime.datetime.now().strftime("%d-%b-%Y (%H:%M:%S)")
+    sys.tracebacklimit = 0
+    logging.basicConfig(filename='ECS_Mig_Helper.log', level=logging.INFO, format='%(asctime)-15s %(message)s')
+    logging.info('Started')
 
     # display arguments if DEBUG enabled
     if DEBUG:
@@ -320,31 +324,32 @@ def main():
         logging.info("password: " + password)
         logging.info("csv filename: " + csv_filename)
         logging.info("namespace: " + namespace)
-        if not replicationgroup:
-            logging.info("replication group: not set")
-        else:
-            logging.info("replication group: " + replicationgroup)
-    else:
-        sys.tracebacklimit = 0
 
-    myecs = ecs()
-    myecs.token = myecs.get_token(hostname, username, password)
-    if myecs.token == "":
+    if not replicationgroup:
+        logging.info("replication group: not set")
+    else:
+        logging.info("replication group: " + replicationgroup)
+
+    MyECS = ecs()
+    MyECS.token = MyECS.get_token(hostname, username, password)
+    if MyECS.token == "":
         exit(1)
 
     if operation == "rc":
-        myecs.ret_classes = myecs.parse_rc_csv(csv_filename)
-        if len(myecs.ret_classes) > 0:
-            myecs.create_retentionclasses_from_list(hostname, username, password, namespace, myecs.ret_classes, testrun)
+        print("Option Retention Classes chosen")
+        MyECS.ret_classes = MyECS.parse_rc_csv(csv_filename)
+        if len(MyECS.ret_classes) > 0:
+            MyECS.create_retentionclasses_from_list(hostname, username, password, namespace, MyECS.ret_classes, testrun)
 
     if operation == "buckets":
-        myecs.buckets = myecs.parse_bucket_csv(csv_filename)
-        if len(myecs.buckets) > 0:
+        print("Option Buckets chosen")
+        MyECS.buckets = MyECS.parse_bucket_csv(csv_filename)
+        if len(MyECS.buckets) > 0:
             if not replicationgroup:
-                myecs.replicationgroup = myecs.get_replicationgroup(hostname, username, password)
+                MyECS.replicationgroup = MyECS.get_replicationgroup(hostname, username, password)
             else:
-                myecs.replicationgroup = replicationgroup
-            myecs.create_buckets_from_list(hostname, username, password, namespace, myecs.buckets, testrun)
+                MyECS.replicationgroup = replicationgroup
+            MyECS.create_buckets_from_list(hostname, username, password, MyECS.buckets, testrun)
 
     logging.info('Finished')
 
