@@ -4,7 +4,7 @@
 __author__ = "Oliver Schlueter"
 __copyright__ = "Copyright 2022, Dell Technologies"
 __license__ = "GPL"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __email__ = "oliver.schlueter@dell.com"
 __status__ = "Production"
 
@@ -309,7 +309,7 @@ def main():
     # get and test arguments
     get_argument()
 
-    print("Start ...")
+    print("Start Verion: ", __version__)
     if testrun:
         print("TESTRUN")
 
